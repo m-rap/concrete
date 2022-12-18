@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
-	"strconv"
 )
 
 type Concrete struct {
@@ -40,7 +40,7 @@ func (Concrete c) CreateConvo(owner ConcreteNode, members []ConcreteNode, convoT
 		}
 	}
 	convoLastId++
-	convoId := strconv.Itoa(convoLastId)
+	convoId := base64.StdEncoding.EncodeString(convoLastId)
 	c.Convos[convoId] = ConcreteConvo{}
 	pConvo := &c.Convos[convoId]
 	pConvo.Type = convoType
