@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 )
 
 type Concrete struct {
-	Nodes  map[string]ConcreteNode
-	Convos map[string]ConcreteConvo
+	Nodes  map[string]*ConcreteNode
+	Convos map[string]*ConcreteConvo
 }
 
 var convoLastId int = -1
@@ -17,58 +18,62 @@ const (
 	ConvoGroup  = 1
 )
 
-func (Concrete c) CreateConvo(owner ConcreteNode, members []ConcreteNode, convoType int) {
+func (c Concrete) CreateConvo(owner string, members []string, convoType int) {
 	if convoType == ConvoDirect {
 		for _, v := range c.Convos {
 			if v.Type != ConvoDirect {
 				continue
 			}
-			if (owner.Id == v.Owner.Id &&
-				members[0].Id == v.Members[0].Id) ||
-				(members[0].Id == v.Owner.Id &&
-					owner.Id == v.Members[0].Id) {
-				owner.OnCreatedConvo(&v)
+			if (owner == v.Owner &&
+				members[0] == v.Members[0]) ||
+				(members[0] == v.Owner &&
+					owner == v.Members[0]) {
+				c.Nodes[owner].OnCreatedConvo(v)
 				return
 			}
 		}
 	}
 
 	for _, v := range members {
-		sm, ok := c.Nodes
+		_, ok := c.Nodes[v]
 		if !ok {
 			return
 		}
 	}
 	convoLastId++
-	convoId := base64.StdEncoding.EncodeString(convoLastId)
-	c.Convos[convoId] = ConcreteConvo{}
-	pConvo := &c.Convos[convoId]
-	pConvo.Type = convoType
-	pConvo.Members = members
-	pConvo.Owner = owner
-	owner.OnCreatedConvo(pConvo)
+	convoIdBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(convoIdBytes, uint64(convoLastId))
+	convoId := base64.StdEncoding.EncodeToString(convoIdBytes)
+	c.Convos[convoId] = &ConcreteConvo{
+		Type:    convoType,
+		Members: members,
+		Owner:   owner,
+	}
+
+	pConvo := c.Convos[convoId]
+	c.Nodes[owner].OnCreatedConvo(pConvo)
 	for _, v := range members {
-		v.OnCreatedConvo(pConvo)
+		c.Nodes[v].OnCreatedConvo(pConvo)
 	}
 }
 
-func (Concrete c) Relay(convoId string, msg ConcreteMsg) {
+func (c Concrete) Relay(convoId string, msg *ConcreteMsg) {
 	convo, ok := c.Convos[convoId]
 	if !ok {
 		fmt.Println("server can't recognize convo")
 		return
 	}
-	for i, member := range convo.Members {
-		member.Recv(convoId, msg)
+	for _, member := range convo.Members {
+		c.Nodes[member].Recv(convoId, msg)
 	}
 }
 
 type ConcreteNode struct {
 	Id     string
-	Convos map[string]ConcreteConvo
+	Convos map[string]*ConcreteConvo
 }
 
-func (ConcreteNode n) Recv(convoId string, msg ConcreteMsg) {
+func (n ConcreteNode) Recv(convoId string, msg *ConcreteMsg) {
 	switch msg.D1 {
 	case 0:
 		// respond nego
@@ -78,12 +83,13 @@ func (ConcreteNode n) Recv(convoId string, msg ConcreteMsg) {
 			fmt.Println("not member of convo\n")
 			return
 		}
-		convo.Msgs[convoId] = msg
+		msg2 := *msg
+		convo.Msgs = append(convo.Msgs, &msg2)
 	}
 }
 
-func (ConcreteNode n) OnCreatedConvo(convo *ConcreteConvo) {
-	n.Convos[convoId] = ConcreteConvo{
+func (n ConcreteNode) OnCreatedConvo(convo *ConcreteConvo) {
+	n.Convos[convo.Id] = &ConcreteConvo{
 		Id:      convo.Id,
 		Owner:   convo.Owner,
 		Members: convo.Members,
@@ -92,7 +98,7 @@ func (ConcreteNode n) OnCreatedConvo(convo *ConcreteConvo) {
 
 type ConcreteMsg struct {
 	owner     string
-	D1        string
+	D1        int
 	D2        string
 	D3        bool
 	D4        string
@@ -106,7 +112,7 @@ type ConcreteConvo struct {
 	Type        int
 	Admins      []string
 	Members     []string
-	Msgs        []ConcreteMsg
+	Msgs        []*ConcreteMsg
 	CreatedTime int
 }
 
